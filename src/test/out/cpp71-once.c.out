@@ -1,5 +1,3 @@
 int main();
 static void _cscout_dummy1(void) { _cscout_dummy1(); }
- 5+ 5
-f 45
-f
+1; 

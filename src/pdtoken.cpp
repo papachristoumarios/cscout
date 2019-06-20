@@ -1,5 +1,5 @@
 /*
- * (C) Copyright 2001-2015 Diomidis Spinellis
+ * (C) Copyright 2001-2019 Diomidis Spinellis
  *
  * This file is part of CScout.
  *
@@ -73,10 +73,33 @@ stackbool Pdtoken::iftaken;		// Taken #ifs
 vectorstring Pdtoken::include_path;	// Files in include path
 int Pdtoken::skiplevel = 0;		// Level of enclosing #ifs when skipping
 mapMacroBody Pdtoken::macro_body_tokens;	// Tokens and the macros they belong to
+// Files that must be skipped rather than included (#pragma once)
+set<Fileid> Pdtoken::skipped_includes;
+vectorPdtoken Pdtoken::current_line;	// Currently read line
 
+CompiledRE Pdtoken::preprocessed_output_spec;	// Files to preprocess
+
+bool
+Pdtoken::shall_skip(Fileid fid)
+{
+	bool ret = skipped_includes.find(fid) != skipped_includes.end();
+	if (DP())
+		cout << "shall_skip(" << fid.get_path() << " = " << ret << '\n';
+	return ret;
+}
 
 void
 Pdtoken::getnext()
+{
+	getnext_expand();
+	if (get_code() == '\n')
+		current_line.clear();
+	else
+		current_line.push_back(*this);
+}
+
+void
+Pdtoken::getnext_expand()
 {
 	Pltoken t;
 
@@ -670,7 +693,8 @@ Pdtoken::process_include(bool next)
 	// #include <foo.h> and #include "foo.h"
 	if (is_absolute_filename(f.get_val())) {
 		if (can_open(f.get_val())) {
-			Fchar::push_input(f.get_val());
+			if (!Pdtoken::shall_skip(Fileid(f.get_val())))
+				Fchar::push_input(f.get_val());
 			return;
 		}
 	} else {
@@ -689,7 +713,8 @@ Pdtoken::process_include(bool next)
 		if (f.get_code() == ABSFNAME && !next) {
 			string fname(Fchar::get_dir() + "/" + f.get_val());
 			if (can_open(fname)) {
-				Fchar::push_input(fname);
+				if (!Pdtoken::shall_skip(Fileid(fname)))
+					Fchar::push_input(fname);
 				return;
 			}
 		}
@@ -701,7 +726,8 @@ Pdtoken::process_include(bool next)
 			string fname(*i + "/" + f.get_val());
 			if (DP()) cout << "Try open " << fname << "\n";
 			if (can_open(fname)) {
-				Fchar::push_input(fname);
+				if (!Pdtoken::shall_skip(Fileid(fname)))
+					Fchar::push_input(fname);
 				Fchar::get_fileid().set_ipath_offset(i - include_path.begin());
 				return;
 			}
@@ -950,6 +976,23 @@ Pdtoken::process_error(enum e_error_level e)
 		Error::error(e, msg);
 }
 
+// Preprocess specified file to the standard output
+static void
+preprocess_to_output(const string& s)
+{
+	Fchar::push_input(s);
+	Fchar::lock_stack();
+	for (;;) {
+		Pdtoken t;
+
+		t.getnext();
+		if (t.get_code() == EOF)
+			break;
+		cout << t.get_c_val();
+	}
+	Fchar::unlock_stack();
+}
+
 void
 Pdtoken::process_pragma()
 {
@@ -959,8 +1002,6 @@ Pdtoken::process_pragma()
 		return;
 	Pltoken t;
 
-	if (skiplevel >= 1)
-		return;
 	t.getnext_nospc<Fchar>();
 	if (t.get_code() != IDENTIFIER) {
 		eat_to_eol();
@@ -1000,6 +1041,11 @@ Pdtoken::process_pragma()
 		// XXX now do the work
 	} else if (t.get_val() == "nosync") {
 		// XXX now do the work
+	} else if (t.get_val() == "once") {
+		// Mark the file for skipping next time it is included.
+		Fileid fid(Fchar::get_fileid());
+		if (DP()) cout << "Pragma once on " << fid.get_path() << "\n";
+		Pdtoken::set_skip(fid);
 	} else if (t.get_val() == "includepath") {
 		t.getnext_nospc<Fchar>();
 		if (t.get_code() != STRING_LITERAL) {
@@ -1030,9 +1076,12 @@ Pdtoken::process_pragma()
 			eat_to_eol();
 			return;
 		}
-		string s = t.get_val();
-		for (string::const_iterator i = s.begin(); i != s.end();)
-			cerr << unescape_char(s, i);
+		// Echo unless we're preprocessing to stdout
+		if (!preprocessed_output_spec.isSet()) {
+			string s = t.get_val();
+			for (string::const_iterator i = s.begin(); i != s.end();)
+				cerr << unescape_char(s, i);
+		}
 	} else if (t.get_val() == "project") {
 		t.getnext_nospc<Fchar>();
 		if (t.get_code() != STRING_LITERAL) {
@@ -1065,9 +1114,6 @@ Pdtoken::process_pragma()
 		Fileid fi = Fileid(t.get_val());
 		fi.set_readonly(true);
 	} else if (t.get_val() == "process") {
-		extern int parse_parse();
-		extern void garbage_collect(Fileid fi);
-
 		t.getnext_nospc<Fchar>();
 		if (t.get_code() != STRING_LITERAL) {
 			/*
@@ -1081,12 +1127,24 @@ Pdtoken::process_pragma()
 			eat_to_eol();
 			return;
 		}
-		Fchar::push_input(t.get_val());
-		Fchar::lock_stack();
-		if (parse_parse() != 0)
-			exit(1);
-		garbage_collect(Fileid(t.get_val()));
-		Fchar::unlock_stack();
+		if (preprocessed_output_spec.isSet()) {
+			// Skip or enable preprocessed output
+			if (preprocessed_output_spec.exec( t.get_val().c_str(),
+						0, NULL, 0) != REG_NOMATCH)
+				preprocess_to_output(t.get_val());
+		}
+		if (!preprocessed_output_spec.isSet()) {
+			// Normal processing
+			extern int parse_parse();
+			extern void garbage_collect(Fileid fi);
+
+			Fchar::push_input(t.get_val());
+			Fchar::lock_stack();
+			if (parse_parse() != 0)
+				exit(1);
+			garbage_collect(Fileid(t.get_val()));
+			Fchar::unlock_stack();
+		}
 	} else if (t.get_val() == "pushd") {
 		char buff[4096];
 
@@ -1133,9 +1191,10 @@ Pdtoken::process_pragma()
 		if (chdir(dirstack.top().c_str()) != 0)
 			Error::error(E_FATAL, "popd: " + dirstack.top() + ": " + string(strerror(errno)));
 		dirstack.pop();
-	} else if (t.get_val() == "clear_include")
+	} else if (t.get_val() == "clear_include") {
 		Pdtoken::clear_include();
-	else if (t.get_val() == "clear_defines")
+		Pdtoken::clear_skipped();
+	} else if (t.get_val() == "clear_defines")
 		Pdtoken::macros_clear();
 	else if (t.get_val() == "ro_prefix") {
 		t.getnext_nospc<Fchar>();
@@ -1246,6 +1305,15 @@ operator<<(ostream& o,const dequePtoken &dp)
 		o << *i;
 	return (o);
 }
+
+ostream&
+operator<<(ostream& o,const vectorPdtoken &dp)
+{
+	for (auto i = dp.begin(); i != dp.end(); i++)
+		o << i->get_c_val();
+	return (o);
+}
+
 
 #ifdef UNIT_TEST
 

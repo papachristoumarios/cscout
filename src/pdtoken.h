@@ -1,5 +1,5 @@
 /*
- * (C) Copyright 2001-2015 Diomidis Spinellis
+ * (C) Copyright 2001-2019 Diomidis Spinellis
  *
  * This file is part of CScout.
  *
@@ -38,6 +38,8 @@ using namespace std;
 
 #include "ptoken.h"
 #include "macro.h"
+#include "fileid.h"
+#include "compiledre.h"
 
 class Pdtoken;
 
@@ -49,6 +51,7 @@ typedef set<string> setstring;
 typedef map<string, PtokenSequence> mapArgval;
 typedef stack<bool> stackbool;
 typedef vector<string> vectorstring;
+typedef vector<Pdtoken> vectorPdtoken;
 
 
 class Macro;
@@ -67,6 +70,8 @@ private:
 	static bool output_defines;		// Output #defines on stdout
 
 	static vectorstring include_path;	// Include file path
+	static vectorPdtoken current_line;	// Currently read line
+	static CompiledRE preprocessed_output_spec;// Files to preprocess
 
 	static void process_directive();	// Handle a cpp directive
 	static void eat_to_eol();		// Consume input including \n
@@ -82,10 +87,29 @@ private:
 	static void process_error(enum e_error_level e);
 						// Handle a #error #warning
 	static void process_pragma();		// Handle a #pragma
+
+	// #pragma once support
+	// Files that must be skipped rather than included
+	static set<Fileid> skipped_includes;	// For #pragma once
+
+	// Clear the list of files that shall not be included.
+	// (At the start of a new compilation unit processing.)
+	static void clear_skipped() { skipped_includes.clear(); }
+
+	// Return true if the specified file shall not be included.
+	// (After it has been processed with #pragma once.)
+	static bool shall_skip(Fileid fid);
+
+	// Add a file to the list of files that shall not be included.
+	// (After encountering a #pragma once directive.)
+	static void set_skip(Fileid fid) { skipped_includes.insert(fid); }
+	// Get the next expanded token
+	void getnext_expand();
 public:
 	// Constructors
 	Pdtoken(const Ptoken &pt) : Ptoken(pt) {};
 	Pdtoken() {};
+	// Get the next expanded token, maintainint the current line's contents
 	void getnext();
 	/*
 	 * Get next token, while processing cpp directives, but without expanding macro
@@ -130,8 +154,17 @@ public:
 	static bool skipping() { return skiplevel != 0; }
 	// Call this to output the #define code on stdout
 	static void set_output_defines() { output_defines = true; }
+	// Return currently read line
+	static const vectorPdtoken& get_current_line() {
+		return current_line;
+	}
+	// Set the RE on which to output preprocessed elements
+	static void set_preprocessed_output(CompiledRE cre) {
+		preprocessed_output_spec = cre;
+	}
 };
 
 ostream& operator<<(ostream& o,const dequePtoken &dp);
+ostream& operator<<(ostream& o,const vectorPdtoken &dp);
 
 #endif // PDTOKEN

@@ -1,6 +1,6 @@
-.TH CSMAKE 1 "10 June 2019"
+.TH CSCC 1 "13 April 2019"
 .\"
-.\" (C) Copyright 2019 Diomidis Spinellis
+.\" (C) Copyright 2016-2019 Diomidis Spinellis
 .\"
 .\" This file is part of CScout.
 .\"
@@ -18,57 +18,49 @@
 .\" along with CScout.  If not, see <http://www.gnu.org/licenses/>.
 .\"
 .SH NAME
-csmake \- CScout make
+cscc \- CScout C compiler front end
 .SH SYNOPSIS
-\fBcsmake\fP
-[\fImake(1) options\fP]
+\fBcscc\fP
+[\fIgcc(1) options\fP]
 .SH DESCRIPTION
-\fIcsmake\fP is a wrapper around \fImake\fP and typical C compilation
+\fIcscc\fP is a wrapper around \fIgcc\fP.
 commands.
-When invoked instead of \fImake\fP on a clean (unbuilt) system,
-it will build the system in the same way as \fImake\fP.
-As a side-effect it will monitor the invocations of
-\fIcc(1)\fP,
-\fIgcc(1)\fP,
-\fIclang(1)\fP,
-\fIar(1)\fP,
-\fIld(1)\fP, and
-\fImv(1)\fP commands and record their environment and arguments.
+When invoked instead of \fIgcc\fP,
+it will compile the specified file(s) in the same way as \fIgcc\fP
+would do.
+As a side-effect it will monitor the invocation of
+\fIgcc(1)\fP
+and record its environment and arguments.
 With those data it will generate a \fICScout\fP project specification
-that can be used to process the project that was compiled.
+that can be used to process the file(s) that were compiled.
 The project specification is saved into a file named \fImake.cs\fP.
-.PP
-To allow \fIcsmake\fP to be used as a drop in replacement in
-build sequences that execute multiple \fImake\fP commands,
-you can create a \fC/var/run/csmake-spy\fP, which will be used
-to create rules for the superset of all \fImake\fP-generated executables.
 .SH EXAMPLE
 The following commands are often the only ones required to process
-a typical C project.
+a few C files.
 .PP
 .DS
 .ft C
 .nf
-make clean
-csmake
+cscc example.c
 cscout make.cs
 .ft P
 .fi
 .DE
 .PP
-If you want to use \fIcsmake\fP with another C compiler, prepend
-\fBCC=\fIcompiler-name\fR to the \fIcsmake\fP invocation,
+If you want to use \fIcscc\fP with another C compiler, prepend
+\fBCC=\fIcompiler-name\fR to the \fIcscc\fP invocation,
 as shown in the following example.
 .PP
 .DS
 .ft C
 .nf
-CC=x86_64-w64-gcc csmake
+CC=x86_64-w64-gcc cscc
 .ft P
 .fi
 .DE
 .PP
 .SH "SEE ALSO"
-cscout(1)
+cscout(1),
+csmake(1)
 .SH AUTHOR
-(C) Copyright 2006-2016 Diomidis Spinellis.
+(C) Copyright 2006-2019 Diomidis Spinellis.
